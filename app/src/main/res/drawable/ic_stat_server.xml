@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- ícone de servidor (racks) para a notificação -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,4h16v6L4,10zM6,6v2h5L11,6zM4,13h16v6L4,19zM6,15v2h5L11,15zM14,15.5v1h4v-1z" />
+</vector>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GTA Mirror Server</string>
+    <string name="channel_name">Servidor local</string>
+    <string name="channel_desc">Notificação persistente do servidor local do espelho do jogo</string>
+    <string name="notif_title">Servidor local ativo</string>
+    <string name="notif_stop">Parar</string>
+</resources>

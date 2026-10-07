@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -76,6 +77,7 @@ fun GameScreen(
     var progress by remember { mutableIntStateOf(0) }
     var rendererGone by remember { mutableStateOf(false) }
     var mainFrameError by remember { mutableStateOf<String?>(null) }
+    var notIsolated by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableIntStateOf(0) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var showCaptureHint by remember { mutableStateOf(!LogBus.captureEnabled.value) }
@@ -126,6 +128,9 @@ fun GameScreen(
                             onMainFrameError = { desc ->
                                 mainFrameError = desc
                             },
+                            onNotIsolated = {
+                                notIsolated = true
+                            },
                         ).also { created ->
                             webView = created
                             created.loadUrl(gameUrl)
@@ -141,7 +146,7 @@ fun GameScreen(
         }
 
         // Progresso do Chromium durante a primeira carga (o loader do jogo é o do jogo).
-        if (!rendererGone && progress in 1..99) {
+        if (!rendererGone && !notIsolated && progress in 1..99) {
             LinearProgressIndicator(
                 progress = { progress / 100f },
                 modifier = Modifier
@@ -191,44 +196,71 @@ fun GameScreen(
             }
         }
 
-        // Erro na carga principal (DNS/rede/conexão recusada etc.).
-        mainFrameError?.let { desc ->
-            if (!rendererGone) {
-                Card(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(24.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    ),
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(
-                            "Falha ao carregar o jogo",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                        Spacer(Modifier.size(4.dp))
-                        Text(
-                            desc,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                        Spacer(Modifier.size(12.dp))
-                        Row {
-                            Button(onClick = {
-                                mainFrameError = null
-                                progress = 0
-                                reloadKey++
-                            }) {
-                                Icon(Icons.Filled.Refresh, contentDescription = null)
-                                Spacer(Modifier.size(6.dp))
-                                Text("Tentar de novo")
-                            }
+        // Limitação de plataforma: WebView não suporta isolamento cross-origin
+        // (bug do Chromium fechado como "working as intended"). O jogo usa
+        // SharedArrayBuffer/pthreads e não roda aqui — direciona para o navegador.
+        if (notIsolated && !rendererGone) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                NotIsolatedCard(
+                    gameUrl = gameUrl,
+                    onOpenBrowser = {
+                        LogBus.log(LogBus.APP, "usuário optou por jogar no navegador externo")
+                        try {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(gameUrl))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        } catch (e: Exception) {
+                            LogBus.log(LogBus.APP, "nenhum navegador disponível: ${e.message}")
                         }
-                    }
+                    },
+                    onDismiss = { notIsolated = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotIsolatedCard(
+    gameUrl: String,
+    onOpenBrowser: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        modifier = Modifier
+            .padding(24.dp)
+            .fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Text(
+                "O jogo não roda no WebView — limite do Android",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                "O WebView do Android não suporta isolamento cross-origin (COOP/COEP) " +
+                    "por decisão do próprio Chromium — crossOriginIsolated é sempre false, " +
+                    "então SharedArrayBuffer/pthreads do wasm ficam indisponíveis. " +
+                    "Não é um erro do servidor (ele envia os headers, provado pelos testes " +
+                    "de paridade) e nenhum ajuste no app pode mudar isso.\n\n" +
+                    "Solução: jogar no navegador (Chrome/Firefox) — o servidor continua " +
+                    "rodando neste aparelho em $gameUrl. A tela de título funciona aqui; " +
+                    "só as threads do jogo é que precisam de navegador.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.size(16.dp))
+            Row {
+                Button(onClick = onOpenBrowser) {
+                    Icon(Icons.Filled.OpenInNew, contentDescription = null)
+                    Spacer(Modifier.size(6.dp))
+                    Text("Jogar no navegador")
                 }
+                Spacer(Modifier.size(8.dp))
+                FilledTonalButton(onClick = onDismiss) { Text("Continuar aqui") }
             }
         }
     }
@@ -274,8 +306,10 @@ private fun createGameWebView(
     onProgress: (Int) -> Unit,
     onRendererGone: () -> Unit,
     onMainFrameError: (String) -> Unit,
+    onNotIsolated: () -> Unit,
 ): WebView {
     var lastProgressMilestone = -1
+    var probedIsolation = false
     return WebView(context).apply {
     layoutParams = ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -351,6 +385,37 @@ private fun createGameWebView(
 
         override fun onPageFinished(view: WebView, url: String) {
             LogBus.log(LogBus.WEBVIEW, "página concluída: $url")
+            // Sonda única: o jogo exige crossOriginIsolated (SharedArrayBuffer) para
+            // as threads do wasm. O WebView do Android NUNCA fica isolado (decisão do
+            // Chromium, bug fechado como "working as intended") — detectamos aqui e
+            // registramos no log para o export.
+            if (!probedIsolation) {
+                probedIsolation = true
+                // Marcadores simples sem aspas (evaluateJavascript devolve JSON, e aspas
+                // internas viram \\" — impossibilitando contains(\"...\") confiável).
+                view.evaluateJavascript(
+                    "(window.crossOriginIsolated?'COI_TRUE':'COI_FALSE') + '|' + " +
+                        "((typeof SharedArrayBuffer)!=='undefined'?'SAB_TRUE':'SAB_FALSE')"
+                ) { result ->
+                    val raw = result?.trim() ?: "?"
+                    val coi = raw.contains("COI_TRUE")
+                    val sab = raw.contains("SAB_TRUE")
+                    LogBus.log(
+                        LogBus.WEBVIEW,
+                        "sonda de isolamento: crossOriginIsolated=$coi, " +
+                            "SharedArrayBuffer=$sab (resposta bruta: $raw)"
+                    )
+                    if (!coi || !sab) {
+                        LogBus.log(
+                            LogBus.WEBVIEW,
+                            "SEM isolamento cross-origin: o WebView do Android não suporta " +
+                                "COOP/COEP (limitação do Chromium, working as intended). " +
+                                "O jogo precisa de navegador de verdade (Chrome/Firefox)."
+                        )
+                        onNotIsolated()
+                    }
+                }
+            }
         }
 
         override fun onLoadResource(view: WebView, url: String) {

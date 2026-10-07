@@ -57,20 +57,46 @@ Como o servidor é idêntico byte a byte ao original (65 testes de paridade),
 o travamento não parece estar no protocolo HTTP — as hipóteses principais,
 em ordem de probabilidade, e como a captura ajuda a confirmar cada uma:
 
-1. **Versão do WebView/Chromium** — `SharedArrayBuffer`/`crossOriginIsolated`
-   (que o wasm pthread usa) exige Chromium ≥ 96 e os headers COOP/COEP (que o
-   servidor já envia). Se o WebView do aparelho for velho, a espera por mutex
-   trava. *Na captura:* veja a linha `webview:` do cabeçalho do export.
+### Causa confirmada no WebView (v1.1.1): sem isolamento cross-origin
+
+O erro `not cross-origin isolated: open the page over https (or localhost);
+the server sends COOP/COEP` dentro do app foi reproduzido, capturado e
+CONFIRMADO como **limitação de plataforma**: o WebView do Android **não
+suporta isolamento cross-origin de forma alguma — mesmo com o servidor
+enviando COOP/COEP** (bug do Chromium fechado como *"working as intended"*).
+Consequência: `crossOriginIsolated` é sempre `false` e `SharedArrayBuffer`
+nunca existe no WebView — as threads do wasm não têm como nascer.
+
+O que o app faz desde a v1.1.1:
+
+- ao concluir a carga, uma **sonda** mede `crossOriginIsolated` e
+  `SharedArrayBuffer` e grava o resultado no log capturado;
+- se não houver isolamento, o app mostra um **card explicando a limitação**
+  com o botão **"Jogar no navegador"** (Chrome/Firefox no mesmo aparelho —
+  o servidor segue rodando em `127.0.0.1:porta`, e navegadores reais
+  suportam COOP/COEP);
+- a tela de título do jogo funciona no WebView (é HTML/CSS); o que exige
+  navegador é a parte com threads (wasm/pthreads).
+
+O travamento em 66% relatado anteriormente aconteceu em navegador real, onde
+o SAB existe — nesse caso as hipóteses restantes são as de baixo (áudio
+gesture, OOM etc.). A captura segue sendo a ferramenta de diagnóstico.
+
+### Hipóteses restantes (jogando no navegador real) e o que procurar no export
+1. **Política de áudio (principal suspeita do mutex)** — o `AudioContext`
+   no Android só sai do estado `suspended` após um toque real do usuário; o
+   worklet de áudio fica parado e a main thread espera na trava — exatamente
+   o sintoma "Loading audio metadata + Create Lock [mutex]". *Teste:* toque
+   na tela assim que o jogo abrir e veja se passa dos 66%. *No export do
+   WebView:* avisos de autoplay/console de áudio (nosso WebView desbloqueia
+   mídia via `mediaPlaybackRequiresUserGesture=false`, por isso o in-app é
+   útil para comparar).
 2. **Arquivo de áudio faltando ou corrompido na pasta espelhada** — se um
    fetch nunca responde/404, a promessa do loader nunca resolve e a main
    thread fica na trava. *Na captura:* linhas `ERRO http 404` (WEBVIEW) e a
    última requisição SERVIDOR antes do silêncio — a que não recebe resposta
    é a suspeita.
-3. **Política de áudio do WebView** — o `AudioContext` só sai do estado
-   `suspended` após um toque em alguns aparelhos. *Na captura:* avisos de
-   autoplay/console de áudio. Solução paliativa: toque na tela assim que o
-   jogo abrir.
-4. **OOM do renderer** — wasm grande + vários workers podem estourar
+3. **OOM do renderer** — wasm grande + vários workers podem estourar
    memória; o app detecta e registra `processo de renderização MORREU`.
 
 Como capturar e enviar:

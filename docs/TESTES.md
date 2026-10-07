@@ -119,3 +119,26 @@ serviços do sistema) e foram verificados por roteiro manual:
 | M9 | Servidor desligado + abrir jogo | Tela de erro "Falha ao carregar o jogo" (main frame) com "Tentar de novo"/voltar |
 | M10 | (Se ocorrer) morte do renderer | Card de recuperação + linha `processo de renderização MORREU` no log, sem fechar o app |
 | M11 | Travamento em 66% reproduzido com captura | Export contém a última requisição SERVIDOR respondida e as mensagens de console anteriores ao congelamento — base para o diagnóstico do README |
+
+## 7. v1.1.1 — sonda de isolamento cross-origin (causa confirmada)
+
+Causa confirmada no export do usuário: o jogo mostra "not cross-origin
+isolated…" no WebView. O Chromium documenta que o **WebView do Android não
+suporta isolamento cross-origin de forma alguma** (bug fechado como
+"working as intended"), então `crossOriginIsolated=false` e
+`SharedArrayBuffer` não existem — nada que o servidor ou o app possam fazer
+( headers COOP/COEP comprovados pelos testes de paridade). Comportamento
+novo: sonda automática + card de orientação com atalho para o navegador.
+
+| # | Cenário | Esperado |
+|---|---------|----------|
+| M12 | Abrir o jogo no WebView (qualquer aparelho) | Após `página concluída`, linha WEBVIEW `sonda de isolamento: crossOriginIsolated=false, SharedArrayBuffer=false` + card "O jogo não roda no WebView" com botão "Jogar no navegador" |
+| M13 | Tocar "Jogar no navegador" | Chrome/Firefox abre `http://127.0.0.1:porta/` (servidor no mesmo aparelho) e o jogo roda com threads (navegador real suporta COOP/COEP) |
+| M14 | Tocar "Continuar aqui" | Card some; tela de título do jogo segue utilizável no WebView (HTML/CSS sem threads) |
+| M15 | Navegador que não existe / desativado | `startActivity` lança ActivityNotFoundException → não crasha o app (Android trata; botão simplesmente não abre nada) |
+
+Observação honesta: o travamento em 66% relatado ocorreu em navegador real
+(onde SAB existe). A hipótese principal é a política de autoplay do
+`AudioContext` (main thread presa em mutex esperando o worklet de áudio) —
+o roteiro de teste é tocar na tela ao abrir o jogo e, se persistir, enviar o
+export capturado para análise (README §Diagnóstico).

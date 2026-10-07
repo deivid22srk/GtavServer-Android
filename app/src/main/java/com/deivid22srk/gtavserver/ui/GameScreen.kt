@@ -282,7 +282,7 @@ private fun createGameWebView(
         ViewGroup.LayoutParams.MATCH_PARENT,
     )
     setBackgroundColor(Color.BLACK)
-    isKeepScreenOn = true // tela acesa durante o jogo (o servidor tem o wake lock próprio)
+    keepScreenOn = true // tela acesa durante o jogo (o servidor tem o wake lock próprio)
 
     with(settings) {
         javaScriptEnabled = true

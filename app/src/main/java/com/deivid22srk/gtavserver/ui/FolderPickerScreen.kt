@@ -17,7 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Up
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -132,7 +132,7 @@ fun FolderPickerScreen(
                 },
                 enabled = File(current).parent != null,
             ) {
-                Icon(Icons.Filled.Up, contentDescription = null, Modifier.size(16.dp))
+                Icon(Icons.Filled.ArrowUpward, contentDescription = null, Modifier.size(16.dp))
                 Spacer(Modifier.size(4.dp))
                 Text("Subir um nível")
             }

@@ -384,7 +384,7 @@ private fun createGameWebView(
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
             LogBus.log(
                 LogBus.WEBVIEW,
-                "!!! processo de renderização do WebView MORREU (didCrash=${detail.didCrash}) " +
+                "!!! processo de renderização do WebView MORREU (didCrash=${detail.didCrash()}) " +
                     "— típico de OOM no wasm; horário registrado para cruzar com o log do servidor"
             )
             (view.parent as? ViewGroup)?.removeView(view)

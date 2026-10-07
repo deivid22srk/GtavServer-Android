@@ -3,6 +3,7 @@ package com.deivid22srk.gtavserver
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -17,11 +18,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.deivid22srk.gtavserver.data.Prefs
+import com.deivid22srk.gtavserver.server.LogBus
 import com.deivid22srk.gtavserver.server.ServerBus
 import com.deivid22srk.gtavserver.server.ServerService
 import com.deivid22srk.gtavserver.ui.FolderPickerScreen
+import com.deivid22srk.gtavserver.ui.GameScreen
+import com.deivid22srk.gtavserver.ui.LogsScreen
 import com.deivid22srk.gtavserver.ui.StatusScreen
 import com.deivid22srk.gtavserver.ui.theme.GtavServerTheme
 
@@ -43,6 +50,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        if (prefs.captureEnabled) LogBus.setCapture(true)
         requestLegacyNotificationsIfNeeded()
         setContent {
             GtavServerTheme {
@@ -50,55 +58,114 @@ class MainActivity : ComponentActivity() {
                 val starting by ServerBus.starting.collectAsStateWithLifecycle()
                 val url by ServerBus.url.collectAsStateWithLifecycle()
                 val error by ServerBus.error.collectAsStateWithLifecycle()
-                val logs by ServerBus.logs.collectAsStateWithLifecycle()
+                val captureEnabled by LogBus.captureEnabled.collectAsStateWithLifecycle()
+                val logEntries by LogBus.entries.collectAsStateWithLifecycle()
+                // Telas: status | picker | game | logs
                 var screen by remember { mutableStateOf("status") }
                 var folder by remember { mutableStateOf(prefs.folder) }
                 var port by remember { mutableStateOf(prefs.port) }
                 var hasStorage by remember { mutableStateOf(hasFullStorage()) }
 
-                if (screen == "picker") {
-                    FolderPickerScreen(
-                        initialPath = folder,
-                        onPick = { picked ->
-                            folder = picked
-                            prefs.folder = picked
-                            screen = "status"
-                        },
-                        onBack = { screen = "status" },
-                    )
-                } else {
-                    StatusScreen(
-                        running = running,
-                        starting = starting,
-                        url = url,
-                        error = error,
-                        logs = logs,
-                        folder = folder,
-                        port = port,
-                        hasStorage = hasStorage,
-                        onRequestStorage = {
-                            requestStorageAccess()
-                            hasStorage = hasFullStorage()
-                        },
-                        onPortChange = { p ->
-                            port = p
-                            prefs.port = p
-                        },
-                        onStart = {
-                            if (!hasFullStorage()) {
+                // Jogo: paisagem imersiva em tela cheia (webview horizontal).
+                LaunchedOrientationImmersive(fullscreen = screen == "game")
+
+                when (screen) {
+                    "game" -> {
+                        GameScreen(
+                            gameUrl = url ?: "http://127.0.0.1:$port/",
+                            onExit = { screen = "status" },
+                            onEnableCapture = {
+                                LogBus.setCapture(true)
+                                prefs.captureEnabled = true
+                            },
+                        )
+                    }
+                    "logs" -> {
+                        LogsScreen(
+                            captureEnabled = captureEnabled,
+                            onToggleCapture = { enabled ->
+                                LogBus.setCapture(enabled)
+                                prefs.captureEnabled = enabled
+                            },
+                            onClose = { screen = "status" },
+                        )
+                    }
+                    "picker" -> {
+                        FolderPickerScreen(
+                            initialPath = folder,
+                            onPick = { picked ->
+                                folder = picked
+                                prefs.folder = picked
+                                screen = "status"
+                            },
+                            onBack = { screen = "status" },
+                        )
+                    }
+                    else -> {
+                        StatusScreen(
+                            running = running,
+                            starting = starting,
+                            url = url,
+                            error = error,
+                            logs = logEntries.takeLast(8).map { LogBus.format(it) },
+                            folder = folder,
+                            port = port,
+                            hasStorage = hasStorage,
+                            captureEnabled = captureEnabled,
+                            batteryIgnored = isIgnoringBatteryOptimizations(),
+                            onRequestStorage = {
                                 requestStorageAccess()
                                 hasStorage = hasFullStorage()
-                            } else {
-                                folder = prefs.folder
-                                ServerService.start(this, folder, port)
-                            }
-                        },
-                        onStop = { ServerService.stop(this) },
-                        onPickFolder = { screen = "picker" },
-                        onIgnoreBattery = { requestIgnoreBattery() },
-                        batteryIgnored = isIgnoringBatteryOptimizations(),
-                    )
+                            },
+                            onPortChange = { p ->
+                                port = p
+                                prefs.port = p
+                            },
+                            onStart = {
+                                if (!hasFullStorage()) {
+                                    requestStorageAccess()
+                                    hasStorage = hasFullStorage()
+                                } else {
+                                    folder = prefs.folder
+                                    ServerService.start(this, folder, port)
+                                }
+                            },
+                            onStop = { ServerService.stop(this) },
+                            onPickFolder = { screen = "picker" },
+                            onOpenGame = {
+                                LogBus.log(LogBus.APP, "usuário abriu o jogo em tela cheia")
+                                screen = "game"
+                            },
+                            onOpenLogs = { screen = "logs" },
+                            onCaptureToggle = { enabled ->
+                                LogBus.setCapture(enabled)
+                                prefs.captureEnabled = enabled
+                            },
+                            onIgnoreBattery = { requestIgnoreBattery() },
+                        )
+                    }
                 }
+            }
+        }
+    }
+
+    /** Trava em landscape sensorial + esconde as barras do sistema na tela do jogo. */
+    @androidx.compose.runtime.Composable
+    private fun LaunchedOrientationImmersive(fullscreen: Boolean) {
+        androidx.compose.runtime.LaunchedEffect(fullscreen) {
+            if (fullscreen) {
+                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                val controller = WindowInsetsControllerCompat(window, window.decorView)
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                LogBus.log(LogBus.APP, "modo tela cheia horizontal ativado")
+            } else {
+                val controller = WindowInsetsControllerCompat(window, window.decorView)
+                controller.show(WindowInsetsCompat.Type.systemBars())
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
         }
     }

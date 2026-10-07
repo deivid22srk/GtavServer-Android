@@ -99,3 +99,23 @@ a cada push/PR.
    comparação do `If-Modified-Since` para mtimes com fração de segundo
    (filesystems com granularidade de ns); fixture e arquivos reais usam
    segundos inteiros.
+
+## 6. v1.1.0 — WebView em tela cheia e captura de logs (testes manuais)
+
+O `core` não mudou nesta versão — os 65 testes de paridade continuam cobrindo
+o protocolo. Os recursos novos são de camada Android (WebView, FileProvider,
+serviços do sistema) e foram verificados por roteiro manual:
+
+| # | Cenário | Esperado |
+|---|---------|----------|
+| M1 | Tocar "Abrir jogo (tela cheia, horizontal)" | Activity trava em landscape, barras do sistema somem, WebView carrega `http://127.0.0.1:porta/` com fundo preto |
+| M2 | Botão voltar no jogo | Se há histórico, volta uma página; senão sai da tela do jogo, restaura retrato e as barras |
+| M3 | Rotação/dobras do aparelho com o jogo aberto | WebView não recarrega (configChanges no manifest) |
+| M4 | Switch "Captura de logs" | Estado persiste entre execuções (prefs); ao ligar, evento `captura de logs LIGADA` aparece |
+| M5 | Carregar o jogo com captura ligada | "Ver logs" mostra WEBVIEW (console do wasm, recursos, progresso do chromium) e SERVIDOR (requests reais) intercalados por timestamp |
+| M6 | "Exportar" | Gera `gtavserver-logs-<ts>.txt` com cabeçalho de ambiente (app/Android/WebView/contagens) e abre o compartilhador; arquivo abre no destinatário |
+| M7 | Filtros Tudo/Servidor/WebView/App na tela de logs | Lista filtra; "acompanhar" segue o fim e para ao rolar para cima |
+| M8 | Link externo dentro do jogo | Abre no navegador externo e fica registrado como APP |
+| M9 | Servidor desligado + abrir jogo | Tela de erro "Falha ao carregar o jogo" (main frame) com "Tentar de novo"/voltar |
+| M10 | (Se ocorrer) morte do renderer | Card de recuperação + linha `processo de renderização MORREU` no log, sem fechar o app |
+| M11 | Travamento em 66% reproduzido com captura | Export contém a última requisição SERVIDOR respondida e as mensagens de console anteriores ao congelamento — base para o diagnóstico do README |

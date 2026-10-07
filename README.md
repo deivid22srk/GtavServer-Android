@@ -21,7 +21,15 @@ sobre a mesma árvore de arquivos e comparam as respostas brutas.
   morte do processo;
 - UI **Jetpack Compose / Material You** (cores dinâmicas no Android 12+,
   tema escuro) com logs de requisições em tempo real, copiar URL e abrir no
-  navegador.
+  navegador;
+- **Jogo dentro do app**: WebView horizontal em **tela cheia imersiva**
+  (landscape, barras do sistema escondidas), com configurações adequadas para
+  wasm (JS, DOM storage, autoplay de mídia, prioridade máxima do renderer);
+- **Captura de logs opcional** (o usuário liga/desliga): grava o log do
+  **servidor** (requisições reais) + o log da **WebView** (console do
+  jogo/wasm, erros HTTP, recursos, crash do renderer) em um anel de 6.000
+  linhas e **exporta** um `.txt` via seletor do sistema — feito para
+  diagnosticar o travamento em 66% ("Loading audio metadata").
 
 ## Como usar
 
@@ -31,12 +39,49 @@ sobre a mesma árvore de arquivos e comparam as respostas brutas.
    no pacote original era `mirror/playgta5.com`);
 4. Toque em **Iniciar servidor**; abra `http://127.0.0.1:8000/` no navegador
    (ou use o botão "Testar no navegador");
-5. Controles do jogo (do README original): Espaço abre a seleção de mapas,
+5. Ou toque em **Abrir jogo (tela cheia, horizontal)** para jogar dentro do
+   app em WebView paisagem imersiva (voltar sai do jogo; os comandos são os
+   do item 6 abaixo);
+6. Controles do jogo (do README original): Espaço abre a seleção de mapas,
    `5` seleciona o mapa GTA V, `6` o mapa `env_test` (GTA VI), Enter entra no
    Story Mode. URLs diretas: `/?mode=sandbox` e `/?mode=sandbox&map=env_test`.
 
 > O app serve apenas `127.0.0.1` (como o `Launch-Local.cmd`). A porta padrão é
 > **8000** e pode ser trocada na tela principal.
+
+## Diagnosticando o travamento em 66% ("Loading audio metadata")
+
+Sintoma relatado: o jogo para em 66%, na etapa "Loading audio metadata", e o
+log do wasm mostra a thread principal esperando em `Create Lock [mutex]`.
+Como o servidor é idêntico byte a byte ao original (65 testes de paridade),
+o travamento não parece estar no protocolo HTTP — as hipóteses principais,
+em ordem de probabilidade, e como a captura ajuda a confirmar cada uma:
+
+1. **Versão do WebView/Chromium** — `SharedArrayBuffer`/`crossOriginIsolated`
+   (que o wasm pthread usa) exige Chromium ≥ 96 e os headers COOP/COEP (que o
+   servidor já envia). Se o WebView do aparelho for velho, a espera por mutex
+   trava. *Na captura:* veja a linha `webview:` do cabeçalho do export.
+2. **Arquivo de áudio faltando ou corrompido na pasta espelhada** — se um
+   fetch nunca responde/404, a promessa do loader nunca resolve e a main
+   thread fica na trava. *Na captura:* linhas `ERRO http 404` (WEBVIEW) e a
+   última requisição SERVIDOR antes do silêncio — a que não recebe resposta
+   é a suspeita.
+3. **Política de áudio do WebView** — o `AudioContext` só sai do estado
+   `suspended` após um toque em alguns aparelhos. *Na captura:* avisos de
+   autoplay/console de áudio. Solução paliativa: toque na tela assim que o
+   jogo abrir.
+4. **OOM do renderer** — wasm grande + vários workers podem estourar
+   memória; o app detecta e registra `processo de renderização MORREU`.
+
+Como capturar e enviar:
+
+1. Na tela principal (ou no card do jogo), ligue o switch **Captura de logs**
+   ANTES de reproduzir;
+2. Abra o jogo e espere travar em 66%;
+3. Volte, abra **Ver logs → Exportar** (ou **Exportar** direto no card) e
+   envie o `.txt` gerado — o cabeçalho já traz app, Android, versão do
+   WebView e contagens; o corpo cruza no tempo o console do jogo com as
+   requisições reais do servidor.
 
 ## Estrutura
 
@@ -55,7 +100,10 @@ core/                     # motor do servidor — Kotlin puro, sem Android
   src/test/               # 65 testes, incl. PARIDADE vs serve_local.py original
 app/                      # UI + integração Android
   .../server/ServerService.kt  # Foreground Service (specialUse) + wake locks
-  .../ui/                 # Compose Material You (status + navegador de pastas)
+  .../server/LogBus.kt         # captura opcional SERVIDOR/WEBVIEW/APP (anel 6k)
+  .../server/LogExporter.kt    # export .txt com cabeçalho de ambiente + share
+  .../ui/                 # Compose Material You (status, jogo em tela cheia,
+                          # navegador de pastas, visualizador de logs)
   AndroidManifest.xml     # permissões, network_security_config, property FGS
 docs/ANALISE.md           # engenharia reversa completa (runtime.zip + gta.zip)
 docs/TESTES.md            # metodologia e matriz dos testes de paridade

@@ -43,5 +43,16 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Servidor HTTP local (127.0.0.1) que serve a pasta do espelho do jogo selecionada pelo usuário, com paridade ao serve_local.py original (headers COOP/COEP, byte ranges e POST /data/batch)." />
         </service>
+
+        <!-- Compartilhamento dos logs capturados (servidor + webview) via seletor do sistema -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.logs"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

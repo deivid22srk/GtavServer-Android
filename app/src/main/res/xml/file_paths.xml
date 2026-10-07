@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Caminhos expostos ao compartilhador para exportar a captura de logs. -->
+<paths>
+    <cache-path
+        name="exports"
+        path="exports/" />
+</paths>

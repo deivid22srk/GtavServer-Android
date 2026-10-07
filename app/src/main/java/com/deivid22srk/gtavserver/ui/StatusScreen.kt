@@ -15,9 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -26,9 +23,12 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VideogameAsset
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -51,10 +51,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.deivid22srk.gtavserver.server.ServerBus
+import com.deivid22srk.gtavserver.server.LogBus
+import com.deivid22srk.gtavserver.server.LogExporter
 
-/** Tela principal: status do servidor, URL, pasta, porta e logs em tempo real. */
+/** Tela principal: status do servidor, URL, pasta, porta, jogo em tela cheia e diagnóstico. */
 @Composable
 fun StatusScreen(
     running: Boolean,
@@ -65,22 +65,22 @@ fun StatusScreen(
     folder: String,
     port: Int,
     hasStorage: Boolean,
+    captureEnabled: Boolean,
+    batteryIgnored: Boolean,
     onRequestStorage: () -> Unit,
     onPortChange: (Int) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onPickFolder: () -> Unit,
+    onOpenGame: () -> Unit,
+    onOpenLogs: () -> Unit,
+    onCaptureToggle: (Boolean) -> Unit,
     onIgnoreBattery: () -> Unit,
-    batteryIgnored: Boolean,
 ) {
     val context = LocalContext.current
-    val listState = rememberLazyListState()
     var portText by remember { mutableStateOf(port.toString()) }
 
     LaunchedEffect(port) { portText = port.toString() }
-    LaunchedEffect(logs.size) {
-        if (logs.isNotEmpty()) listState.animateScrollToItem(logs.size - 1)
-    }
 
     Column(
         Modifier
@@ -139,6 +139,16 @@ fun StatusScreen(
                             Spacer(Modifier.size(4.dp))
                             Text("Testar no navegador")
                         }
+                    }
+                    // Jogo em WebView horizontal em tela cheia (paisagem imersiva).
+                    Button(onClick = onOpenGame, modifier = Modifier.fillMaxWidth()) {
+                        Icon(
+                            Icons.Filled.VideogameAsset,
+                            contentDescription = null,
+                            Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Text("Abrir jogo (tela cheia, horizontal)")
                     }
                 }
             }
@@ -257,47 +267,63 @@ fun StatusScreen(
             }
         }
 
-        // ----- Logs -----
+        // ----- Captura de logs (diagnóstico do travamento) -----
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Logs de requisições (reais)", style = MaterialTheme.typography.titleSmall)
-                    IconButton(onClick = { ServerBus.clearLogs() }) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Captura de logs", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Grava servidor + WebView (console do wasm) para exportar e " +
+                                "diagnosticar travamentos.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = captureEnabled, onCheckedChange = onCaptureToggle)
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = onOpenLogs) {
+                        Text("Ver logs")
+                    }
+                    FilledTonalButton(onClick = { LogExporter.exportAndShare(context) }) {
+                        Icon(Icons.Filled.IosShare, contentDescription = null, Modifier.size(16.dp))
+                        Spacer(Modifier.size(4.dp))
+                        Text("Exportar")
+                    }
+                    IconButton(onClick = { LogBus.clear() }) {
                         Icon(
                             Icons.Filled.DeleteSweep,
-                            contentDescription = "Limpar logs",
+                            contentDescription = "Limpar captura",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Últimas linhas (tudo em Ver logs):",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 if (logs.isEmpty()) {
                     Text(
-                        "Sem requisições ainda. Ligue o servidor e abra " +
-                            "http://127.0.0.1:8000 no navegador.",
+                        if (captureEnabled) "Nada capturado ainda." else "Captura desligada.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace,
                     )
                 } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(240.dp),
-                    ) {
-                        items(logs) { line ->
-                            Text(
-                                line,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                    logs.forEach { line ->
+                        Text(
+                            line,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
